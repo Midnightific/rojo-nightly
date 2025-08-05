@@ -1,24 +1,88 @@
 name: Nightly Release
 
 on:
-  workflow_dispatch:
   schedule:
-    - cron: "0 0 * * *" # Runs at midnight UTC everyday
+    - cron: "0 0 * * *"
+  workflow_dispatch:
 
 jobs:
   create-release:
-    name: Create Release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    outputs:
+      tag: ${{ steps.bump.outputs.new_tag }}
+      should_skip: ${{ steps.check_commits.outputs.skip }}
+
     steps:
       - uses: actions/checkout@v4
-      - name: Create Release
+        with:
+          fetch-depth: 0
+
+      - name: Setup Git config
+        run: |
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
+
+      - name: Fetch all tags
+        run: git fetch --tags
+
+      - name: Check for new commits since last tag
+        id: check_commits
+        run: |
+          LATEST_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || echo "")
+          if [ -z "$LATEST_TAG" ]; then
+            echo "No existing tags found, this will be the first release"
+            echo "skip=false" >> $GITHUB_OUTPUT
+            echo "latest_tag=v0.0.0" >> $GITHUB_OUTPUT
+          else
+            echo "Latest tag is $LATEST_TAG"
+            COMMITS=$(git log $LATEST_TAG..origin/master --oneline)
+            if [ -z "$COMMITS" ]; then
+              echo "No new commits since $LATEST_TAG"
+              echo "skip=true" >> $GITHUB_OUTPUT
+            else
+              echo "New commits detected"
+              echo "skip=false" >> $GITHUB_OUTPUT
+            fi
+            echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Stop workflow if no new commits
+        if: steps.check_commits.outputs.skip == 'true'
+        run: |
+          echo "No new commits, stopping the workflow."
+          exit 0
+
+      - name: Bump patch version
+        id: bump
+        if: steps.check_commits.outputs.skip == 'false'
+        run: |
+          LATEST_TAG="${{ steps.check_commits.outputs.latest_tag }}"
+          VERSION="${LATEST_TAG#v}"
+          IFS='.' read -r major minor patch <<< "$VERSION"
+          patch=$((patch + 1))
+          new_tag="v$major.$minor.$patch"
+          echo "New tag: $new_tag"
+          echo "new_tag=$new_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push new tag
+        if: steps.check_commits.outputs.skip == 'false'
+        run: |
+          git tag ${{ steps.bump.outputs.new_tag }}
+          git push origin ${{ steps.bump.outputs.new_tag }}
+
+      - name: Create GitHub draft release
+        if: steps.check_commits.outputs.skip == 'false'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create ${{ github.ref_name }} --draft --verify-tag --title ${{ github.ref_name }}
+          gh release create ${{ steps.bump.outputs.new_tag }} --draft --title ${{ steps.bump.outputs.new_tag }} --notes "Nightly automated release"
 
   build-plugin:
     needs: ["create-release"]
+    if: needs.create-release.outputs.should_skip == 'false'
     name: Build Roblox Studio Plugin
     runs-on: ubuntu-latest
     steps:
@@ -29,7 +93,7 @@ jobs:
       - name: Setup Aftman
         uses: ok-nick/setup-aftman@v0.4.2
         with:
-          version: 'v0.3.0'
+          version: 'v0.4.2'
 
       - name: Build Plugin
         run: rojo build plugin.project.json --output Rojo.rbxm
@@ -38,7 +102,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload ${{ github.ref_name }} Rojo.rbxm
+          gh release upload ${{ needs.create-release.outputs.tag }} Rojo.rbxm
 
       - name: Upload Plugin to Artifacts
         uses: actions/upload-artifact@v4
@@ -48,6 +112,7 @@ jobs:
 
   build:
     needs: ["create-release"]
+    if: needs.create-release.outputs.should_skip == 'false'
     strategy:
       fail-fast: false
       matrix:
@@ -99,7 +164,7 @@ jobs:
       - name: Setup Aftman
         uses: ok-nick/setup-aftman@v0.4.2
         with:
-          version: 'v0.3.0'
+          version: 'v0.4.0'
 
       - name: Build Release
         run: cargo build --release --locked --verbose --target ${{ matrix.target }}
@@ -116,7 +181,7 @@ jobs:
       - name: Generate Artifact Name
         shell: bash
         env:
-          TAG_NAME: ${{ github.ref_name }}
+          TAG_NAME: ${{ needs.create-release.outputs.tag }}
         run: |
           echo "ARTIFACT_NAME=$BIN-${TAG_NAME#v}-${{ matrix.label }}.zip" >> "$GITHUB_ENV"
 
@@ -137,4 +202,4 @@ jobs:
             zip ../$ARTIFACT_NAME *
           fi
 
-          gh release upload ${{ github.ref_name }} ../$ARTIFACT_NAME
+          gh release upload ${{ needs.create-release.outputs.tag }} ../$ARTIFACT_NAME
