@@ -2,8 +2,8 @@ name: Nightly Release
 
 on:
   workflow_dispatch:
-    schedule:
-      - cron: "0 0 * * *" # Runs at midnight UTC everyday
+  schedule:
+    - cron: "0 0 * * *" # Runs at midnight UTC everyday
 
 jobs:
   create-release:
