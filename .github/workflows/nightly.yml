@@ -31,13 +31,13 @@ jobs:
       - name: Check for new commits since last tag
         id: check_commits
         run: |
-          LATEST_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || echo "")
+          LATEST_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-nightly$' | head -n1 || echo "")
           if [ -z "$LATEST_TAG" ]; then
-            echo "No existing tags found, this will be the first release"
+            echo "No existing nightly tags found, this will be the first nightly release"
             echo "skip=false" >> $GITHUB_OUTPUT
-            echo "latest_tag=v0.0.0" >> $GITHUB_OUTPUT
+            echo "latest_tag=v0.0.0-nightly" >> $GITHUB_OUTPUT
           else
-            echo "Latest tag is $LATEST_TAG"
+            echo "Latest nightly tag is $LATEST_TAG"
             COMMITS=$(git log $LATEST_TAG..origin/master --oneline)
             if [ -z "$COMMITS" ]; then
               echo "No new commits since $LATEST_TAG"
@@ -61,10 +61,11 @@ jobs:
         run: |
           LATEST_TAG="${{ steps.check_commits.outputs.latest_tag }}"
           VERSION="${LATEST_TAG#v}"
+          VERSION="${VERSION%-nightly}"
           IFS='.' read -r major minor patch <<< "$VERSION"
           patch=$((patch + 1))
-          new_tag="v$major.$minor.$patch"
-          echo "New tag: $new_tag"
+          new_tag="v$major.$minor.$patch-nightly"
+          echo "New nightly tag: $new_tag"
           echo "new_tag=$new_tag" >> "$GITHUB_OUTPUT"
 
       - name: Create and push new tag
