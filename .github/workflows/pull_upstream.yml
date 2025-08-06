@@ -2,7 +2,7 @@ name: Pull Upstream
 
 on:
   schedule:
-    - cron: "15 11 * * *"
+    - cron: "15 23 * * *" # Runs at 11:15pm UTC every day
   workflow_dispatch:
 
 jobs:
