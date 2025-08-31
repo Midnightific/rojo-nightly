@@ -28,26 +28,43 @@ jobs:
       - name: Fetch all tags
         run: git fetch --tags
 
+      - name: Sync with upstream
+        run: |
+          git fetch upstream master
+          git merge upstream/master --no-edit || echo "Merge conflict or no upstream changes"
+
+      - name: Push synced changes
+        run: |
+          git push origin master || echo "No changes to push"
+
       - name: Check for new commits since last tag
         id: check_commits
         run: |
-          LATEST_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-nightly$' | head -n1 || echo "")
-          if [ -z "$LATEST_TAG" ]; then
-            echo "No existing nightly tags found, this will be the first nightly release"
-            echo "skip=false" >> $GITHUB_OUTPUT
-            echo "latest_tag=v0.0.0-nightly" >> $GITHUB_OUTPUT
+          # Get the latest upstream version tag (not nightly)
+          UPSTREAM_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || echo "v0.0.0")
+          echo "Latest upstream version tag: $UPSTREAM_TAG"
+
+          # Get current commit hash and date
+          COMMIT_HASH=$(git rev-parse --short HEAD)
+          COMMIT_DATE=$(date +%Y%m%d)
+
+          # Create nightly tag format: v7.5.1-nightly-20250831-abc1234
+          NIGHTLY_TAG="$UPSTREAM_TAG-nightly-$COMMIT_DATE-$COMMIT_HASH"
+          echo "Proposed nightly tag: $NIGHTLY_TAG"
+
+          # Check if this exact nightly tag already exists
+          if git tag -l | grep -q "^$NIGHTLY_TAG$"; then
+            echo "Nightly tag $NIGHTLY_TAG already exists, skipping"
+            echo "skip=true" >> $GITHUB_OUTPUT
           else
-            echo "Latest nightly tag is $LATEST_TAG"
-            COMMITS=$(git log $LATEST_TAG..origin/master --oneline)
-            if [ -z "$COMMITS" ]; then
-              echo "No new commits since $LATEST_TAG"
-              echo "skip=true" >> $GITHUB_OUTPUT
-            else
-              echo "New commits detected"
-              echo "skip=false" >> $GITHUB_OUTPUT
-            fi
-            echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+            echo "New nightly release needed"
+            echo "skip=false" >> $GITHUB_OUTPUT
           fi
+
+          echo "upstream_tag=$UPSTREAM_TAG" >> $GITHUB_OUTPUT
+          echo "commit_hash=$COMMIT_HASH" >> $GITHUB_OUTPUT
+          echo "commit_date=$COMMIT_DATE" >> $GITHUB_OUTPUT
+          echo "nightly_tag=$NIGHTLY_TAG" >> $GITHUB_OUTPUT
 
       - name: Stop workflow if no new commits
         if: steps.check_commits.outputs.skip == 'true'
@@ -55,18 +72,20 @@ jobs:
           echo "No new commits, stopping the workflow."
           exit 0
 
-      - name: Bump patch version
+      - name: Create nightly tag
         id: bump
         if: steps.check_commits.outputs.skip == 'false'
         run: |
-          LATEST_TAG="${{ steps.check_commits.outputs.latest_tag }}"
-          VERSION="${LATEST_TAG#v}"
-          VERSION="${VERSION%-nightly}"
-          IFS='.' read -r major minor patch <<< "$VERSION"
-          patch=$((patch + 1))
-          new_tag="v$major.$minor.$patch-nightly"
-          echo "New nightly tag: $new_tag"
-          echo "new_tag=$new_tag" >> "$GITHUB_OUTPUT"
+          NIGHTLY_TAG="${{ steps.check_commits.outputs.nightly_tag }}"
+          COMMIT_HASH="${{ steps.check_commits.outputs.commit_hash }}"
+
+          # Get the commit title for release notes
+          COMMIT_TITLE=$(git log -1 --pretty=format:'%s')
+          echo "Commit title: $COMMIT_TITLE"
+
+          echo "Creating nightly tag: $NIGHTLY_TAG"
+          echo "new_tag=$NIGHTLY_TAG" >> "$GITHUB_OUTPUT"
+          echo "commit_title=$COMMIT_TITLE" >> "$GITHUB_OUTPUT"
 
       - name: Create and push new tag
         if: steps.check_commits.outputs.skip == 'false'
@@ -74,12 +93,18 @@ jobs:
           git tag ${{ steps.bump.outputs.new_tag }}
           git push origin ${{ steps.bump.outputs.new_tag }}
 
-      - name: Create GitHub draft release
+      - name: Create GitHub release
         if: steps.check_commits.outputs.skip == 'false'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create ${{ steps.bump.outputs.new_tag }} --draft --title ${{ steps.bump.outputs.new_tag }} --notes "Nightly automated release"
+          UPSTREAM_TAG="${{ steps.check_commits.outputs.upstream_tag }}"
+          COMMIT_TITLE="${{ steps.bump.outputs.commit_title }}"
+          COMMIT_HASH="${{ steps.check_commits.outputs.commit_hash }}"
+
+          gh release create ${{ steps.bump.outputs.new_tag }} \
+            --title "Nightly ${{ steps.bump.outputs.new_tag }}" \
+            --notes "Nightly automated release based on $UPSTREAM_TAG. Latest commit: $COMMIT_TITLE ($COMMIT_HASH). This is an automated nightly build."
 
   build-plugin:
     needs: ["create-release"]
@@ -103,7 +128,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload ${{ needs.create-release.outputs.tag }} Rojo.rbxm
+          # Wait a moment for release to be fully created
+          sleep 5
+          gh release upload ${{ needs.create-release.outputs.tag }} Rojo.rbxm --clobber
 
       - name: Upload Plugin to Artifacts
         uses: actions/upload-artifact@v4
@@ -203,4 +230,4 @@ jobs:
             zip ../$ARTIFACT_NAME *
           fi
 
-          gh release upload ${{ needs.create-release.outputs.tag }} ../$ARTIFACT_NAME
+          gh release upload ${{ needs.create-release.outputs.tag }} ../$ARTIFACT_NAME --clobber
