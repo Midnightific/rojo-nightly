@@ -1,3 +1,11 @@
+This is a forked version of Rojo that builds and releases new commits/changes to upstream Rojo nightly.
+*note: will not run if there were no commits to the `master` branch of the upstream rojo respository that day.*
+
+\
+&nbsp;
+\
+&nbsp;
+
 <div align="center">
     <a href="https://rojo.space"><img src="assets/brand_images/logo-512.png" alt="Rojo" height="217" /></a>
 </div>
