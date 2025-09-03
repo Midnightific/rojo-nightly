@@ -55,11 +55,12 @@ jobs:
           # Strip any existing nightly suffix to avoid double-nightly tags
           BASE_TAG=$(echo "$UPSTREAM_TAG" | sed 's/-nightly.*//')
 
-          # Get current commit hash and date
-          COMMIT_HASH=$(git rev-parse --short HEAD)
+          # Use fork's HEAD commit hash (full and short) after merge
+          COMMIT_HASH=$(git rev-parse HEAD)
+          COMMIT_SHORT=$(git rev-parse --short HEAD)
           COMMIT_DATE=$(date +%Y%m%d)
 
-          NIGHTLY_TAG="${BASE_TAG}-nightly-${COMMIT_DATE}-${COMMIT_HASH}"
+          NIGHTLY_TAG="${BASE_TAG}-nightly-${COMMIT_DATE}-${COMMIT_SHORT}"
           echo "Proposed nightly tag: $NIGHTLY_TAG"
 
           # Check if this exact nightly tag already exists
@@ -73,6 +74,7 @@ jobs:
 
           echo "upstream_tag=$UPSTREAM_TAG" >> $GITHUB_OUTPUT
           echo "commit_hash=$COMMIT_HASH" >> $GITHUB_OUTPUT
+          echo "commit_short=$COMMIT_SHORT" >> $GITHUB_OUTPUT
           echo "commit_date=$COMMIT_DATE" >> $GITHUB_OUTPUT
           echo "nightly_tag=$NIGHTLY_TAG" >> $GITHUB_OUTPUT
 
@@ -88,6 +90,7 @@ jobs:
         run: |
           NIGHTLY_TAG="${{ steps.check_commits.outputs.nightly_tag }}"
           COMMIT_HASH="${{ steps.check_commits.outputs.commit_hash }}"
+          COMMIT_SHORT="${{ steps.check_commits.outputs.commit_short }}"
 
           # Get the commit title for release notes
           COMMIT_TITLE=$(git log -1 --pretty=format:'%s')
@@ -96,6 +99,7 @@ jobs:
           echo "Creating nightly tag: $NIGHTLY_TAG"
           echo "new_tag=$NIGHTLY_TAG" >> "$GITHUB_OUTPUT"
           echo "commit_title=$COMMIT_TITLE" >> "$GITHUB_OUTPUT"
+          echo "commit_short=$COMMIT_SHORT" >> "$GITHUB_OUTPUT"
 
       - name: Create and push new tag
         if: steps.check_commits.outputs.skip == 'false'
@@ -110,12 +114,13 @@ jobs:
         run: |
           UPSTREAM_TAG="${{ steps.check_commits.outputs.upstream_tag }}"
           COMMIT_TITLE="${{ steps.bump.outputs.commit_title }}"
+          COMMIT_SHORT="${{ steps.bump.outputs.commit_short }}"
           COMMIT_HASH="${{ steps.check_commits.outputs.commit_hash }}"
 
           gh release create ${{ steps.bump.outputs.new_tag }} \
             --repo "$GITHUB_REPOSITORY" \
             --title "Nightly ${{ steps.bump.outputs.new_tag }}" \
-            --notes "Nightly automated release based on $UPSTREAM_TAG. Latest commit: $COMMIT_TITLE ($COMMIT_HASH). This is an automated nightly build." \
+            --notes "Nightly automated release based on $UPSTREAM_TAG. Latest commit: $COMMIT_TITLE ($COMMIT_SHORT). This is an automated nightly build." \
             --prerelease \
             --latest=false \
             --target $COMMIT_HASH
