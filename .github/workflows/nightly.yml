@@ -108,10 +108,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Make sure the tag is visible to GitHub before creating the release
-          git fetch origin --tags
-          sleep 5
-
           UPSTREAM_TAG="${{ steps.check_commits.outputs.upstream_tag }}"
           COMMIT_TITLE="${{ steps.bump.outputs.commit_title }}"
           COMMIT_HASH="${{ steps.check_commits.outputs.commit_hash }}"
@@ -119,7 +115,9 @@ jobs:
           gh release create ${{ steps.bump.outputs.new_tag }} \
             --title "Nightly ${{ steps.bump.outputs.new_tag }}" \
             --notes "Nightly automated release based on $UPSTREAM_TAG. Latest commit: $COMMIT_TITLE ($COMMIT_HASH). This is an automated nightly build." \
-            --prerelease
+            --prerelease \
+            --latest=false \
+            --target $COMMIT_HASH
 
   build-plugin:
     needs: ["create-release"]
@@ -143,6 +141,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Wait a moment for release to be fully created
           sleep 5
           gh release upload ${{ needs.create-release.outputs.tag }} Rojo.rbxm --clobber
 
@@ -158,6 +157,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # https://doc.rust-lang.org/rustc/platform-support.html
         include:
           - host: linux
             os: ubuntu-latest
