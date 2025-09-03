@@ -41,7 +41,7 @@ jobs:
       - name: Check for new commits since last tag
         id: check_commits
         run: |
-          # Get the latest upstream version tag 
+          # Get the latest upstream version tag
           UPSTREAM_TAG=$(git describe --tags $(git rev-list --tags --max-count=1) 2>/dev/null || echo "")
 
           # If no upstream tag found, use a default version
@@ -52,11 +52,14 @@ jobs:
             echo "Latest upstream version tag: $UPSTREAM_TAG"
           fi
 
+          # Strip any existing nightly suffix to avoid double-nightly tags
+          BASE_TAG=$(echo "$UPSTREAM_TAG" | sed 's/-nightly.*//')
+
           # Get current commit hash and date
           COMMIT_HASH=$(git rev-parse --short HEAD)
           COMMIT_DATE=$(date +%Y%m%d)
 
-          NIGHTLY_TAG="$UPSTREAM_TAG-nightly-$COMMIT_DATE-$COMMIT_HASH"
+          NIGHTLY_TAG="${BASE_TAG}-nightly-${COMMIT_DATE}-${COMMIT_HASH}"
           echo "Proposed nightly tag: $NIGHTLY_TAG"
 
           # Check if this exact nightly tag already exists
@@ -105,13 +108,18 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # Make sure the tag is visible to GitHub before creating the release
+          git fetch origin --tags
+          sleep 5
+
           UPSTREAM_TAG="${{ steps.check_commits.outputs.upstream_tag }}"
           COMMIT_TITLE="${{ steps.bump.outputs.commit_title }}"
           COMMIT_HASH="${{ steps.check_commits.outputs.commit_hash }}"
 
           gh release create ${{ steps.bump.outputs.new_tag }} \
             --title "Nightly ${{ steps.bump.outputs.new_tag }}" \
-            --notes "Nightly automated release based on $UPSTREAM_TAG. Latest commit: $COMMIT_TITLE ($COMMIT_HASH). This is an automated nightly build."
+            --notes "Nightly automated release based on $UPSTREAM_TAG. Latest commit: $COMMIT_TITLE ($COMMIT_HASH). This is an automated nightly build." \
+            --prerelease
 
   build-plugin:
     needs: ["create-release"]
@@ -135,7 +143,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Wait a moment for release to be fully created
           sleep 5
           gh release upload ${{ needs.create-release.outputs.tag }} Rojo.rbxm --clobber
 
@@ -151,7 +158,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # https://doc.rust-lang.org/rustc/platform-support.html
         include:
           - host: linux
             os: ubuntu-latest
