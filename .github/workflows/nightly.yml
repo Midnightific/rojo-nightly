@@ -31,7 +31,7 @@ jobs:
       - name: Add upstream remote and sync
         run: |
           git remote add upstream https://github.com/rojo-rbx/rojo.git
-          git fetch upstream master
+          git fetch upstream master --tags
           git merge upstream/master --no-edit || echo "Merge conflict or no upstream changes"
 
       - name: Push synced changes
@@ -41,15 +41,21 @@ jobs:
       - name: Check for new commits since last tag
         id: check_commits
         run: |
-          # Get the latest upstream version tag (not nightly)
-          UPSTREAM_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -n1 || echo "v0.0.0")
-          echo "Latest upstream version tag: $UPSTREAM_TAG"
+          # Get the latest upstream version tag 
+          UPSTREAM_TAG=$(git describe --tags $(git rev-list --tags --max-count=1) 2>/dev/null || echo "")
+
+          # If no upstream tag found, use a default version
+          if [ -z "$UPSTREAM_TAG" ]; then
+            UPSTREAM_TAG="v0.1.0"
+            echo "No upstream version tags found, using default: $UPSTREAM_TAG"
+          else
+            echo "Latest upstream version tag: $UPSTREAM_TAG"
+          fi
 
           # Get current commit hash and date
           COMMIT_HASH=$(git rev-parse --short HEAD)
           COMMIT_DATE=$(date +%Y%m%d)
 
-          # Create nightly tag format: v7.5.1-nightly-20250831-abc1234
           NIGHTLY_TAG="$UPSTREAM_TAG-nightly-$COMMIT_DATE-$COMMIT_HASH"
           echo "Proposed nightly tag: $NIGHTLY_TAG"
 
@@ -91,8 +97,8 @@ jobs:
       - name: Create and push new tag
         if: steps.check_commits.outputs.skip == 'false'
         run: |
-          git tag ${{ steps.bump.outputs.new_tag }}
-          git push origin ${{ steps.bump.outputs.new_tag }}
+          git tag "${{ steps.bump.outputs.new_tag }}"
+          git push origin "${{ steps.bump.outputs.new_tag }}"
 
       - name: Create GitHub release
         if: steps.check_commits.outputs.skip == 'false'
