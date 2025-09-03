@@ -28,8 +28,9 @@ jobs:
       - name: Fetch all tags
         run: git fetch --tags
 
-      - name: Sync with upstream
+      - name: Add upstream remote and sync
         run: |
+          git remote add upstream https://github.com/rojo-rbx/rojo.git
           git fetch upstream master
           git merge upstream/master --no-edit || echo "Merge conflict or no upstream changes"
 
