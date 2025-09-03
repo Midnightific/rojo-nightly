@@ -113,6 +113,7 @@ jobs:
           COMMIT_HASH="${{ steps.check_commits.outputs.commit_hash }}"
 
           gh release create ${{ steps.bump.outputs.new_tag }} \
+            --repo "$GITHUB_REPOSITORY" \
             --title "Nightly ${{ steps.bump.outputs.new_tag }}" \
             --notes "Nightly automated release based on $UPSTREAM_TAG. Latest commit: $COMMIT_TITLE ($COMMIT_HASH). This is an automated nightly build." \
             --prerelease \
@@ -141,9 +142,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Wait a moment for release to be fully created
           sleep 5
-          gh release upload ${{ needs.create-release.outputs.tag }} Rojo.rbxm --clobber
+          gh release upload ${{ needs.create-release.outputs.tag }} Rojo.rbxm --clobber --repo "$GITHUB_REPOSITORY"
 
       - name: Upload Plugin to Artifacts
         uses: actions/upload-artifact@v4
@@ -157,7 +157,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # https://doc.rust-lang.org/rustc/platform-support.html
         include:
           - host: linux
             os: ubuntu-latest
@@ -243,4 +242,4 @@ jobs:
             zip ../$ARTIFACT_NAME *
           fi
 
-          gh release upload ${{ needs.create-release.outputs.tag }} ../$ARTIFACT_NAME --clobber
+          gh release upload ${{ needs.create-release.outputs.tag }} ../$ARTIFACT_NAME --clobber --repo "$GITHUB_REPOSITORY"
