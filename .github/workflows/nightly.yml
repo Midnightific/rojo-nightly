@@ -1,0 +1,267 @@
+name: Nightly Release
+
+on:
+  schedule:
+    - cron: "0 0 * * *" # Runs at midnight UTC every day
+  workflow_dispatch:
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    outputs:
+      tag: ${{ steps.bump.outputs.new_tag }}
+      should_skip: ${{ steps.check_commits.outputs.skip }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Git config
+        run: |
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
+
+      - name: Fetch all tags
+        run: git fetch --tags
+
+      - name: Save custom files
+        run: |
+          mkdir -p /tmp/custom-files
+          cp -r .github/workflows /tmp/custom-files/
+          cp README.md /tmp/custom-files/
+
+      - name: Add upstream remote and sync
+        run: |
+          git remote add upstream https://github.com/rojo-rbx/rojo.git
+          git fetch upstream master --tags
+          # Force sync with upstream to stay clean
+          git reset --hard upstream/master
+          # Restore our custom files
+          cp -r /tmp/custom-files/workflows .github/
+          cp /tmp/custom-files/README.md .
+          # Commit the restored files
+          git add .github/workflows/ README.md
+          git commit -m "Restore custom workflows and README" || echo "No changes to commit"
+
+      - name: Push synced changes
+        run: |
+          git push origin master --force
+
+      - name: Check for new commits since last tag
+        id: check_commits
+        run: |
+          # Get the latest upstream version tag
+          UPSTREAM_TAG=$(git describe --tags $(git rev-list --tags --max-count=1) 2>/dev/null || echo "")
+
+          # If no upstream tag found, use a default version
+          if [ -z "$UPSTREAM_TAG" ]; then
+            UPSTREAM_TAG="v0.1.0"
+            echo "No upstream version tags found, using default: $UPSTREAM_TAG"
+          else
+            echo "Latest upstream version tag: $UPSTREAM_TAG"
+          fi
+
+          # Strip any existing nightly suffix to avoid double-nightly tags
+          BASE_TAG=$(echo "$UPSTREAM_TAG" | sed 's/-nightly.*//')
+
+          # Use fork's HEAD commit hash (full and short) after merge
+          COMMIT_HASH=$(git rev-parse HEAD)
+          COMMIT_SHORT=$(git rev-parse --short HEAD)
+          COMMIT_DATE=$(date +%Y%m%d)
+
+          NIGHTLY_TAG="${BASE_TAG}-nightly-${COMMIT_DATE}-${COMMIT_SHORT}"
+          echo "Proposed nightly tag: $NIGHTLY_TAG"
+
+          # Check if this exact nightly tag already exists
+          if git tag -l | grep -q "^$NIGHTLY_TAG$"; then
+            echo "Nightly tag $NIGHTLY_TAG already exists, skipping"
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "New nightly release needed"
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+          echo "upstream_tag=$UPSTREAM_TAG" >> $GITHUB_OUTPUT
+          echo "commit_hash=$COMMIT_HASH" >> $GITHUB_OUTPUT
+          echo "commit_short=$COMMIT_SHORT" >> $GITHUB_OUTPUT
+          echo "commit_date=$COMMIT_DATE" >> $GITHUB_OUTPUT
+          echo "nightly_tag=$NIGHTLY_TAG" >> $GITHUB_OUTPUT
+
+      - name: Stop workflow if no new commits
+        if: steps.check_commits.outputs.skip == 'true'
+        run: |
+          echo "No new commits, stopping the workflow."
+          exit 0
+
+      - name: Create nightly tag
+        id: bump
+        if: steps.check_commits.outputs.skip == 'false'
+        run: |
+          NIGHTLY_TAG="${{ steps.check_commits.outputs.nightly_tag }}"
+          COMMIT_HASH="${{ steps.check_commits.outputs.commit_hash }}"
+          COMMIT_SHORT="${{ steps.check_commits.outputs.commit_short }}"
+
+          # Get the commit title for release notes
+          COMMIT_TITLE=$(git log -1 --pretty=format:'%s')
+          echo "Commit title: $COMMIT_TITLE"
+
+          echo "Creating nightly tag: $NIGHTLY_TAG"
+          echo "new_tag=$NIGHTLY_TAG" >> "$GITHUB_OUTPUT"
+          echo "commit_title=$COMMIT_TITLE" >> "$GITHUB_OUTPUT"
+          echo "commit_short=$COMMIT_SHORT" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push new tag
+        if: steps.check_commits.outputs.skip == 'false'
+        run: |
+          git tag "${{ steps.bump.outputs.new_tag }}"
+          git push origin "${{ steps.bump.outputs.new_tag }}"
+
+      - name: Create GitHub release
+        if: steps.check_commits.outputs.skip == 'false'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          UPSTREAM_TAG="${{ steps.check_commits.outputs.upstream_tag }}"
+          COMMIT_TITLE="${{ steps.bump.outputs.commit_title }}"
+          COMMIT_SHORT="${{ steps.bump.outputs.commit_short }}"
+          COMMIT_HASH="${{ steps.check_commits.outputs.commit_hash }}"
+
+          gh release create ${{ steps.bump.outputs.new_tag }} \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Nightly ${{ steps.bump.outputs.new_tag }}" \
+            --notes "Nightly automated release based on $UPSTREAM_TAG. Latest commit: $COMMIT_TITLE ($COMMIT_SHORT). This is an automated nightly build." \
+            --prerelease
+
+  build-plugin:
+    needs: ["create-release"]
+    if: needs.create-release.outputs.should_skip == 'false'
+    name: Build Roblox Studio Plugin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Setup Rokit
+        uses: CompeyDev/setup-rokit@v0.1.2
+        with:
+          version: "v1.1.0"
+
+      - name: Install tools with Rokit
+        run: |
+          rokit add JohnnyMorganz/stylua
+          rokit add rojo-rbx/run-in-roblox@0.3.0
+          rokit install
+
+      - name: Build Plugin
+        run: rojo build plugin.project.json --output Rojo.rbxm
+
+      - name: Upload Plugin to Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          sleep 5
+          gh release upload ${{ needs.create-release.outputs.tag }} Rojo.rbxm --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Upload Plugin to Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rojo.rbxm
+          path: Rojo.rbxm
+
+  build:
+    needs: ["create-release"]
+    if: needs.create-release.outputs.should_skip == 'false'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: linux
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            label: linux-x86_64
+
+          - host: windows
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            label: windows-x86_64
+
+          - host: macos
+            os: macos-latest
+            target: x86_64-apple-darwin
+            label: macos-x86_64
+
+          - host: macos
+            os: macos-latest
+            target: aarch64-apple-darwin
+            label: macos-aarch64
+
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    env:
+      BIN: rojo
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Restore Rust Cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ matrix.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Setup Rokit
+        uses: CompeyDev/setup-rokit@v0.1.2
+        with:
+          version: "v1.1.0"
+
+      - name: Build Release
+        run: cargo build --release --locked --verbose --target ${{ matrix.target }}
+
+      - name: Save Rust Cache
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ matrix.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Generate Artifact Name
+        shell: bash
+        env:
+          TAG_NAME: ${{ needs.create-release.outputs.tag }}
+        run: |
+          echo "ARTIFACT_NAME=$BIN-${TAG_NAME#v}-${{ matrix.label }}.zip" >> "$GITHUB_ENV"
+
+      - name: Create Archive and Upload to Release
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir staging
+
+          if [ "${{ matrix.host }}" = "windows" ]; then
+            cp "target/${{ matrix.target }}/release/$BIN.exe" staging/
+            cd staging
+            7z a ../$ARTIFACT_NAME *
+          else
+            cp "target/${{ matrix.target }}/release/$BIN" staging/
+            cd staging
+            zip ../$ARTIFACT_NAME *
+          fi
+
+          gh release upload ${{ needs.create-release.outputs.tag }} ../$ARTIFACT_NAME --clobber --repo "$GITHUB_REPOSITORY"
