@@ -1,0 +1,46 @@
+name: Pull Upstream
+
+on:
+  schedule:
+    - cron: "15 23 * * *" # Runs at 11:15pm UTC every day
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Git
+        run: |
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
+
+      - name: Save custom files
+        run: |
+          mkdir -p /tmp/custom-files
+          cp -r .github/workflows /tmp/custom-files/
+          cp README.md /tmp/custom-files/
+
+      - name: Add upstream and sync
+        run: |
+          git remote add upstream https://github.com/rojo-rbx/rojo.git
+          git fetch upstream master --tags
+          # Force sync with upstream to stay clean
+          git reset --hard upstream/master
+          # Restore our custom files
+          cp -r /tmp/custom-files/workflows .github/
+          cp /tmp/custom-files/README.md .
+          # Commit the restored files
+          git add .github/workflows/ README.md
+          git commit -m "Restore custom workflows and README" || echo "No changes to commit"
+
+      - name: Push changes
+        run: |
+          git push origin master --force
