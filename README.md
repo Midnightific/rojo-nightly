@@ -1,3 +1,11 @@
+This is a forked version of Rojo that builds and releases new commits/changes to upstream Rojo nightly.
+*note: will not run if there were no commits to the `master` branch of the upstream rojo respository that day.*
+
+\
+&nbsp;
+\
+&nbsp;
+
 <div align="center">
     <a href="https://rojo.space"><img src="assets/brand_images/logo-512.png" alt="Rojo" height="217" /></a>
 </div>
@@ -40,7 +48,7 @@ Check out our [contribution guide](CONTRIBUTING.md) for detailed instructions fo
 
 Pull requests are welcome!
 
-Rojo supports Rust 1.88 and newer. The minimum supported version of Rust is based on the latest versions of the dependencies that Rojo has.
+Rojo supports Rust 1.70.0 and newer. The minimum supported version of Rust is based on the latest versions of the dependencies that Rojo has.
 
 ## License
 Rojo is available under the terms of the Mozilla Public License, Version 2.0. See [LICENSE.txt](LICENSE.txt) for details.
